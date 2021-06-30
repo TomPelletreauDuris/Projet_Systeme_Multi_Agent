@@ -1,0 +1,365 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;                     ;;;
+;;; Projet informatique ;;;
+;;;   individuel ENSC   ;;;
+;;;   Pelletreau-Duris  ;;;
+;;;         Tom         ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+
+globals [
+  nombre-agent-critique
+  nombre-agent-naifs
+  compteur-opinions-fausse
+  compteur-opinions-vrai
+]
+
+breed [critiques agent-critique]
+breed [naifs agent-naif]
+
+turtles-own [
+  my-neighbors
+  num-neighbors
+  hasno-neighbors?
+  my-friend-neighbors
+  num-friend-neighbors
+  hasno-friend-neighbors?
+  count-down-true-opinion
+  count-down-fake-opinion
+  True-opinion?
+  Fake-opinion?
+]
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;                     ;;;
+;;; procedure de Set-up ;;;
+;;;                     ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+to setup
+  clear-all
+  set nombre-agent-critique ( 0.01 * Pourcentage-critique * nombre-agent )
+  set nombre-agent-naifs ( nombre-agent - nombre-agent-critique )
+
+  create-critiques nombre-agent-critique                                    ;création des agent critiques
+  [
+    set shape "person"
+    set color white
+    setxy (random-xcor * 0.95) (random-ycor * 0.95)                         ; pour des raisons visuelles on évite de mettre les agent près des murs
+    set True-opinion? false
+    set Fake-opinion? false
+    set hasno-neighbors? false
+    set hasno-friend-neighbors? false
+  ]
+
+  create-naifs nombre-agent-naifs                                           ;création des agent naifs
+  [
+    set shape "person"
+    set color blue
+    setxy (random-xcor * 0.95) (random-ycor * 0.95)                         ; pour des raisons visuelles on évite de mettre les agent près des murs
+    set True-opinion? false
+    set Fake-opinion? false
+    set hasno-neighbors? false
+    set hasno-friend-neighbors? false
+  ]
+
+  creer-random-opinion                                                      ; distribue les opinions parmis les agents
+  creer-random-network                                                      ; créer un réseau d'ami aléatoire
+  ask turtles [afficher-opinion]
+  ask links [afficher-lien]
+  reset-ticks
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;                     ;;;
+;;;  procedure en lien  ;;;
+;;;     avec set-up     ;;;
+;;;                     ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+to creer-random-opinion                                                     ; permet de créer des opinions, mais pas besoin de randomiser sa répartition
+  let compteur 0                                                            ; puisque les agents sont répartis aléatoirement dans l'univers virtuel.
+  while [compteur < nombre-opinion-vrai]
+  [
+    ask one-of turtles
+    [
+      set True-opinion? true
+      setup-timer-true-opinion
+      set compteur-opinions-vrai compteur-opinions-vrai + 1
+    ]
+    set compteur compteur + 1
+  ]
+
+  set compteur 0
+  while [compteur < nombre-opinion-fausse]
+  [
+    ask one-of turtles
+    [
+      set fake-opinion? true
+      setup-timer-fake-opinion
+      set compteur-opinions-fausse compteur-opinions-fausse + 1
+    ]
+    set compteur compteur + 1
+  ]
+
+  set compteur 0
+end
+
+to creer-random-network                                                      ; permet de créer des relations de façon aléatoire dans le réseau
+  let n-liens round((nombre-agent - 1) * Nombre-connexion * 0.01)
+  while [count links < n-liens ]
+  [
+    ask one-of turtles
+    [
+      let choice (min-one-of (other turtles with [not link-neighbor? myself])
+                   [distance myself])
+      if choice != nobody [ create-link-with choice ]
+    ]
+  ]
+  ; make the network look a little prettier
+  repeat 10
+  [
+    layout-spring turtles links 0.3 (world-width / (sqrt nombre-agent)) 1
+  ]
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;                     ;;;
+;;;   procedure de go   ;;;
+;;;                     ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+to go
+  if ticks >= 800 [stop]
+  ask turtles [
+    chercher-voisinnage
+    move-turtles
+    afficher-opinion
+  ]
+
+  tick
+
+  ask turtles [
+    decrement-timer-true-opinion
+    decrement-timer-fake-opinion
+    refresh-opinions
+  ]
+  ask links [afficher-lien]
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;                     ;;;
+;;;   procedure des     ;;;
+;;;      turtles        ;;;
+;;;                     ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+to chercher-voisinnage                                                             ; faculté de perception de l'environnement proche
+
+    set my-neighbors (other turtles) in-radius Rayon-perception                    ; les voisins sont les autres agents proches dans un rayon défini par Rayon-perception
+    set num-neighbors count my-neighbors
+    if (num-neighbors = 0) [set hasno-neighbors? true]
+    set my-friend-neighbors (other in-link-neighbors) in-radius Rayon-perception   ; les amis voisins sont les autres agents avec qui j'ai un lien et qui sont proches dans un rayon défini par Rayon-perception
+    set num-friend-neighbors count my-friend-neighbors
+    if (num-friend-neighbors = 0) [set hasno-friend-neighbors? true]
+
+end
+
+to move-turtles                                                                     ; faculté de mouvement des agents
+  let agent-naifs? false
+  if (breed = naifs) [set agent-naifs? true]
+
+  ifelse hasno-neighbors?  [move-randomly]                                          ; sans voisins, on bouge aléatoirement
+  [
+    ifelse hasno-friend-neighbors?                                                  ; si les voisins ne sont pas des amis, on leur donne nos opinions mais on s'aloigne d'eux que s'ils sont trop près
+    [
+      ifelse agent-naifs?                                                           ; cas d'un agent naif transmettant simplement les opinions
+      [
+        if True-opinion? [Give-neighbors-true-opinion]
+        if Fake-opinion? [Give-neighbors-fake-opinion]
+        move-without-friend
+      ]
+      [
+        if True-opinion? [Give-neighbors-true-opinion]
+        move-without-friend
+      ]
+    ]
+    [
+      ifelse agent-naifs?                                                           ;  cas d'un agent naif transmettant simplement les opinions
+      [
+        if True-opinion? [Give-neighbors-true-opinion]
+        if Fake-opinion? [Give-neighbors-fake-opinion]
+        move-with-friend
+      ]
+      [
+        if True-opinion? [Give-neighbors-true-opinion]
+        move-with-friend
+      ]
+    ]
+  ]
+end
+
+to move-without-friend                                                               ; pour l'instant dirigé vers l'opposé du voisin le plus près
+  let X 0
+  let Y 0
+  let d min [distance myself] of my-neighbors                                        ; plus petite distance me séparant d'un voisin
+
+  ifelse (d < Rayon-distance-minimale )                                              ; on s'éloigne en prenant la direction opposée du voisin le plus près en prenant
+  [                                                                                  ; les coordonées symétrique du point par rappot à l'autre
+    let the-neighbor min-one-of my-neighbors [distance myself]
+    ask the-neighbor [
+      set X xcor
+      set Y ycor
+    ]
+    facexy (2 * xcor - X) (2 * ycor - Y)
+    forward 1
+  ]
+  [
+    move-randomly                                                                      ; comme il n'y a pas d'ami, si le voisin est en deça de la valeur minimale on bouge aléatoirement
+  ]
+end
+
+to move-with-friend                                                                  ; On essai de se rapprocher de ses amis sauf s'ils sont en deça de la valeur du rayon de distance minimale
+  let X 0
+  let Y 0
+  let d min [distance myself] of my-friend-neighbors
+
+  ifelse (d < Rayon-distance-minimale )                                              ; s'il sont trop près on s'éloigne de ses amis de 1
+  [
+    let the-neighbor min-one-of my-friend-neighbors [distance myself]
+    ask the-neighbor [
+      set X xcor
+      set Y ycor
+    ]
+    facexy (2 * xcor - X) (2 * ycor - Y)
+    forward 1                                                                        ; on peut s'éloigner de Rayon-distance-minimale - d ou bien de 1, au choix (1 rend les déplacement plus dynamiques)
+  ]
+  [
+    let the-neighbor min-one-of my-friend-neighbors [distance myself]
+    ask the-neighbor [
+      set X xcor
+      set Y ycor
+    ]
+    facexy (X) (Y)
+    forward 1
+  ]
+end
+
+to move-randomly
+
+  right random 360
+  forward 1
+
+end
+
+to Give-neighbors-true-opinion                                                        ; partager aux voisins les opinions vraies en fonction du taux de repoduction
+  ask my-neighbors
+  [
+    let random-nombre random (1 / Taux-de-reproduction-opinion)
+    if random-nombre = 1
+    [
+      ifelse True-opinion?
+      [
+        setup-timer-true-opinion
+      ]
+      [
+        set True-opinion? true
+        setup-timer-true-opinion
+        set compteur-opinions-vrai compteur-opinions-vrai + 1
+      ]
+    ]
+  ]
+end
+
+to Give-neighbors-fake-opinion                                                       ; partager aux voisins les opinions fake en fonction du taux de repoduction
+  ask my-neighbors
+  [
+    let random-nombre random (1 / Taux-de-reproduction-opinion)
+    if random-nombre = 1
+    [
+      ifelse Fake-opinion?
+      [
+        setup-timer-fake-opinion
+      ]
+      [
+        set Fake-opinion? true
+        setup-timer-fake-opinion
+        set compteur-opinions-fausse compteur-opinions-fausse + 1
+      ]
+    ]
+  ]
+end
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;                     ;;;
+;;;   procedure des     ;;;
+;;;     timers et       ;;;
+;;;   des compteurs     ;;;
+;;;                     ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+to setup-timer-true-opinion
+   set count-down-true-opinion Temps-retention-opinion ; a n tick timer
+end
+
+to setup-timer-fake-opinion
+   set count-down-fake-opinion Temps-retention-opinion ; a n tick timer
+end
+
+to decrement-timer-true-opinion
+   set count-down-true-opinion count-down-true-opinion - 1
+end
+
+to decrement-timer-fake-opinion
+   set count-down-fake-opinion count-down-fake-opinion - 1
+end
+
+to-report timer-true-opinion-expired?
+   report ( count-down-true-opinion <= 0 )
+   set compteur-opinions-vrai compteur-opinions-vrai - 1
+end
+
+to-report timer-fake-opinion-expired?
+   report ( count-down-fake-opinion <= 0 )
+   set compteur-opinions-fausse compteur-opinions-fausse - 1
+end
+
+to refresh-opinions
+  if timer-true-opinion-expired? [set True-opinion? false]
+  if timer-fake-opinion-expired? [set Fake-opinion? false]
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;                     ;;;
+;;;     gestion de      ;;;
+;;;    l'affichage      ;;;
+;;;                     ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+to afficher-opinion
+  set label ""
+
+  if Afficher-opinion?
+  [
+    if True-opinion?  [ set label insert-item 0 label "Vrai "  set label-color green]
+    if Fake-opinion?  [ set label insert-item 0 label "Fake "  set label-color red]
+    if True-opinion? and Fake-opinion? [set label-color 46]
+  ]
+end
+
+to afficher-lien
+  ifelse Afficher-liens? [show-link][hide-link]
+end
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;                                                ;;;
+;;;     MERCI BEAUCOUP POUR VOTRE ATTENTION        ;;;
+;;;            Pelletreau-Duris Tom                ;;;
+;;;                  2A - ENSC                     ;;;
+;;;                                                ;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
